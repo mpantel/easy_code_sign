@@ -1,0 +1,21 @@
+# Built extension output
+dist/
+
+# Ruby dependencies
+.bundle/
+vendor/bundle/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+
+# Native host packaged binaries
+native_host/dist/

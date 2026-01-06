@@ -1,0 +1,90 @@
+# frozen_string_literal: true
+
+require "fileutils"
+
+DIST_DIR = File.expand_path("../dist", __dir__)
+SRC_DIR = File.expand_path("../src", __dir__)
+ROOT_DIR = File.expand_path("../../..", __dir__)
+
+desc "Build native host for current platform"
+task build: :clean do
+  mkdir_p DIST_DIR
+
+  # For development, create a wrapper script that uses Ruby
+  create_dev_wrapper
+end
+
+desc "Package native host as self-contained executable"
+task package: :clean do
+  mkdir_p DIST_DIR
+
+  # Check for ruby-packer
+  unless system("which rubyc > /dev/null 2>&1")
+    puts "ruby-packer (rubyc) not found. Install with: gem install rubyc"
+    puts "Falling back to development wrapper..."
+    create_dev_wrapper
+    exit 0
+  end
+
+  # Package with ruby-packer
+  platform = case RUBY_PLATFORM
+             when /darwin/ then "macos"
+             when /linux/ then "linux"
+             when /mingw|mswin/ then "windows"
+             else "unknown"
+             end
+
+  output_name = platform == "windows" ? "easy_sign_host.exe" : "easy_sign_host_#{platform}"
+  output_path = File.join(DIST_DIR, output_name)
+
+  puts "Packaging native host for #{platform}..."
+
+  # Create a temporary entry point that requires all dependencies
+  entry_point = File.join(SRC_DIR, "easy_sign_host.rb")
+
+  cmd = [
+    "rubyc",
+    entry_point,
+    "-o", output_path,
+    "--add-dependency", "easy_code_sign"
+  ]
+
+  unless system(*cmd)
+    puts "Packaging failed. Check ruby-packer installation."
+    exit 1
+  end
+
+  puts "Created: #{output_path}"
+end
+
+desc "Clean build artifacts"
+task :clean do
+  FileUtils.rm_rf(Dir.glob("#{DIST_DIR}/*"))
+end
+
+desc "Run native host tests"
+task :test do
+  sh "ruby -I#{SRC_DIR} -I#{ROOT_DIR}/lib #{SRC_DIR}/../test/native_host_test.rb"
+end
+
+private
+
+def create_dev_wrapper
+  # Create a shell wrapper for development that uses system Ruby
+  wrapper_path = File.join(DIST_DIR, "easy_sign_host")
+  host_script = File.join(SRC_DIR, "easy_sign_host.rb")
+
+  File.write(wrapper_path, <<~BASH)
+    #!/bin/bash
+    # Development wrapper for EasySign Native Host
+    # Uses system Ruby and requires easy_code_sign gem to be installed
+
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    HOST_SCRIPT="#{host_script}"
+
+    exec ruby "$HOST_SCRIPT" "$@"
+  BASH
+
+  FileUtils.chmod(0o755, wrapper_path)
+  puts "Created development wrapper: #{wrapper_path}"
+end
