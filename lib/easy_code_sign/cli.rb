@@ -20,16 +20,18 @@ module EasyCodeSign
       true
     end
 
-    desc "sign FILE", "Sign a file (gem or zip) using hardware token"
+    desc "sign FILE", "Sign a file (gem, zip, or PDF) using hardware token"
     long_desc <<~DESC
       Sign a file using a hardware security token (HSM/smart card).
 
       Supported file types:
         - Ruby gems (.gem)
         - ZIP archives (.zip, .jar, .apk, .war, .ear)
+        - PDF documents (.pdf)
 
       The signature is embedded in the file. For gems, this creates
-      PKCS#7 detached signatures compatible with `gem cert`.
+      PKCS#7 detached signatures. For PDFs, use --visible-signature
+      to add a visible signature annotation.
     DESC
     option :output, type: :string, aliases: "-o", desc: "Output file path (default: overwrite input)"
     option :timestamp, type: :boolean, default: false, aliases: "-t", desc: "Add RFC 3161 timestamp"
@@ -38,6 +40,12 @@ module EasyCodeSign
     option :provider, type: :string, default: "safenet", desc: "Token provider (safenet)"
     option :library, type: :string, desc: "Path to PKCS#11 library"
     option :slot, type: :numeric, default: 0, desc: "Token slot index"
+    # PDF-specific options
+    option :visible_signature, type: :boolean, default: false, desc: "[PDF] Add visible signature annotation"
+    option :signature_page, type: :numeric, default: 1, desc: "[PDF] Page number for visible signature"
+    option :signature_position, type: :string, default: "bottom_right", desc: "[PDF] Position (top_left, top_right, bottom_left, bottom_right)"
+    option :signature_reason, type: :string, desc: "[PDF] Reason for signing"
+    option :signature_location, type: :string, desc: "[PDF] Location of signing"
     def sign(file)
       configure_from_options
 
@@ -46,13 +54,24 @@ module EasyCodeSign
 
       say "Signing #{file}...", :cyan unless options[:quiet]
 
-      result = EasyCodeSign.sign(
-        file,
+      # Build signing options, including PDF-specific ones
+      sign_opts = {
         pin: pin,
         output_path: options[:output],
         timestamp: options[:timestamp],
         algorithm: algorithm
-      )
+      }
+
+      # Add PDF options if present
+      if File.extname(file).downcase == ".pdf"
+        sign_opts[:visible_signature] = options[:visible_signature]
+        sign_opts[:signature_page] = options[:signature_page]
+        sign_opts[:signature_position] = options[:signature_position]&.to_sym
+        sign_opts[:signature_reason] = options[:signature_reason]
+        sign_opts[:signature_location] = options[:signature_location]
+      end
+
+      result = EasyCodeSign.sign(file, **sign_opts)
 
       if options[:verbose]
         say "\nSigning complete:", :green
@@ -178,6 +197,8 @@ module EasyCodeSign
         display_gem_signature_info(signature)
       when Signable::ZipFile
         display_zip_signature_info(signature)
+      when Signable::PdfFile
+        display_pdf_signature_info(signature)
       end
     rescue EasyCodeSign::Error => e
       say_error "Failed to read signature: #{e.message}"
@@ -276,6 +297,17 @@ module EasyCodeSign
       say "  - MANIFEST.MF: #{signature[:manifest] ? 'present' : 'missing'}"
       say "  - CERT.SF: #{signature[:signature_file] ? 'present' : 'missing'}"
       say "  - CERT.RSA: #{signature[:signature_block] ? 'present' : 'missing'}"
+    end
+
+    def display_pdf_signature_info(signature)
+      say "PDF Signature:"
+      say "  - SubFilter: #{signature[:sub_filter] || 'unknown'}"
+      say "  - ByteRange: #{signature[:byte_range]&.inspect || 'unknown'}"
+      say "  - Name: #{signature[:name]}" if signature[:name]
+      say "  - Reason: #{signature[:reason]}" if signature[:reason]
+      say "  - Location: #{signature[:location]}" if signature[:location]
+      say "  - Signing Time: #{signature[:signing_time]}" if signature[:signing_time]
+      say "  - Contact: #{signature[:contact_info]}" if signature[:contact_info]
     end
 
     def say_error(message)

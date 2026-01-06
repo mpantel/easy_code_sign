@@ -57,6 +57,8 @@ module EasyCodeSign
           verify_gem(signable, signature_data, result)
         when :zipfile
           verify_zip(signable, signature_data, result)
+        when :pdffile
+          verify_pdf(signable, signature_data, result)
         else
           result.add_error("Unsupported file type for verification")
           return result
@@ -117,6 +119,8 @@ module EasyCodeSign
         Signable::GemFile.new(file_path)
       when ".zip", ".jar", ".apk", ".war", ".ear"
         Signable::ZipFile.new(file_path)
+      when ".pdf"
+        Signable::PdfFile.new(file_path)
       else
         raise InvalidFileError, "Unsupported file type: #{extension}"
       end
@@ -187,6 +191,93 @@ module EasyCodeSign
 
       # Verify manifest integrity
       verify_zip_manifest(signable, manifest, signature_file, result)
+    end
+
+    def verify_pdf(signable, signature_data, result)
+      signature_checker = Verification::SignatureChecker.new
+
+      # PDF signatures store PKCS#7 in /Contents and signed data via ByteRange
+      contents = signature_data[:contents]
+      byte_range = signature_data[:byte_range]
+
+      unless contents && byte_range
+        result.add_error("Invalid PDF signature (missing Contents or ByteRange)")
+        return
+      end
+
+      # Read the ByteRange content from the file
+      signed_content = read_byte_range_content(signable.file_path, byte_range)
+
+      # Verify PKCS#7 signature
+      sig_result = signature_checker.verify_pkcs7(contents, signed_content, trust_store)
+
+      result.signature_valid = sig_result.signature_valid
+      result.signer_certificate = sig_result.signer_certificate
+      result.certificate_chain = sig_result.certificates
+      result.signature_algorithm = sig_result.signature_algorithm
+
+      sig_result.errors.each { |e| result.add_error(e) }
+
+      if result.signer_certificate
+        extract_signer_info(result)
+        verify_certificate_chain(result)
+      end
+
+      # Verify PDF integrity (ByteRange covers the document properly)
+      verify_pdf_integrity(signable, signature_data, result)
+
+      # Extract signer info from PDF signature dict
+      extract_pdf_signature_info(signature_data, result)
+    end
+
+    def read_byte_range_content(file_path, byte_range)
+      # ByteRange = [offset1, length1, offset2, length2]
+      # The signed content is: bytes[offset1..offset1+length1] + bytes[offset2..offset2+length2]
+      File.open(file_path, "rb") do |f|
+        f.seek(byte_range[0])
+        part1 = f.read(byte_range[1])
+        f.seek(byte_range[2])
+        part2 = f.read(byte_range[3])
+        part1 + part2
+      end
+    end
+
+    def verify_pdf_integrity(signable, signature_data, result)
+      result.integrity_valid = true
+
+      byte_range = signature_data[:byte_range]
+      return unless byte_range
+
+      file_size = File.size(signable.file_path)
+
+      # Verify ByteRange makes sense:
+      # [0, before_sig_offset, after_sig_offset, rest_of_file]
+      # The end should match file size
+      expected_end = byte_range[2] + byte_range[3]
+
+      unless expected_end == file_size
+        result.integrity_valid = false
+        result.add_error("PDF ByteRange does not cover entire document (expected #{file_size}, got #{expected_end})")
+      end
+
+      # Verify no gap exists (signature placeholder should be between the two ranges)
+      signature_start = byte_range[0] + byte_range[1]
+      signature_end = byte_range[2]
+
+      if signature_start > signature_end
+        result.integrity_valid = false
+        result.add_error("Invalid PDF ByteRange (overlapping ranges)")
+      end
+    end
+
+    def extract_pdf_signature_info(signature_data, result)
+      # Extract additional info from PDF signature dictionary
+      result.signature_reason = signature_data[:reason] if signature_data[:reason]
+      result.signature_location = signature_data[:location] if signature_data[:location]
+
+      # Check for timestamp
+      # This would require parsing the unsigned attributes of the PKCS#7
+      # For now, we don't extract embedded timestamps from PDF
     end
 
     def verify_certificate_chain(result)

@@ -1,11 +1,12 @@
 # EasyCodeSign
 
-A Ruby gem for signing and verifying Ruby gems and ZIP files using hardware security tokens (HSM/smart cards). Currently supports SafeNet eToken with plans for additional providers.
+A Ruby gem for signing and verifying Ruby gems, ZIP files, and PDF documents using hardware security tokens (HSM/smart cards). Currently supports SafeNet eToken with plans for additional providers.
 
 ## Features
 
 - **Sign Ruby gems** (.gem) - Creates PKCS#7 signatures compatible with `gem cert`
 - **Sign ZIP archives** (.zip, .jar, .apk, .war, .ear) - JAR-style signing with META-INF manifest
+- **Sign PDF documents** (.pdf) - Digital signatures with optional visible annotations
 - **Hardware token support** - SafeNet eToken via PKCS#11 (extensible for other HSMs)
 - **RFC 3161 timestamping** - Proves signature existed at a specific time
 - **Full verification** - Signature, certificate chain, trust, and timestamp validation
@@ -48,6 +49,22 @@ easysign sign archive.zip --output signed_archive.zip
 
 # Use specific PKCS#11 library
 easysign sign my_gem.gem --library /path/to/libeToken.dylib
+```
+
+### Sign a PDF
+
+```bash
+# Basic PDF signing (invisible signature)
+easysign sign document.pdf
+
+# PDF with visible signature annotation
+easysign sign document.pdf --visible-signature --signature-position bottom-right
+
+# PDF with timestamp and metadata
+easysign sign document.pdf -t --visible-signature --signature-reason "Approved" --signature-location "New York"
+
+# PDF signing on specific page
+easysign sign document.pdf --visible-signature --signature-page 2
 ```
 
 > **Security Note:** The PIN is always entered interactively via a secure prompt.

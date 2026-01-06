@@ -28,30 +28,44 @@ module EasyCodeSign
     # @param algorithm [Symbol] signature algorithm (:sha256_rsa, etc.)
     # @return [SigningResult] result containing signed file path and metadata
     #
-    def sign(file_path, pin: nil, output_path: nil, timestamp: nil, algorithm: :sha256_rsa)
+    def sign(file_path, pin: nil, output_path: nil, timestamp: nil, algorithm: :sha256_rsa, **extra_options)
       timestamp = configuration.require_timestamp if timestamp.nil?
 
-      signable = create_signable(file_path, output_path: output_path, algorithm: algorithm)
+      signable = create_signable(file_path, output_path: output_path, algorithm: algorithm, **extra_options)
       signable.prepare_for_signing
 
       provider.with_session(pin: pin) do |session|
-        # Get content to sign
-        content = signable.content_to_sign
-
-        # Sign with hardware token
-        signature = session.sign(content, algorithm: algorithm)
-
-        # Get certificate chain
         certificate_chain = session.certificate_chain
-
-        # Get timestamp if requested
         timestamp_token = nil
-        if timestamp
-          timestamp_token = request_timestamp(signature)
-        end
 
-        # Apply signature to file
-        signed_path = signable.apply_signature(signature, certificate_chain, timestamp_token: timestamp_token)
+        # PDF files use deferred signing (callback-based)
+        if signable.is_a?(Signable::PdfFile)
+          # Create signing callback for PDF
+          signing_callback = lambda do |data_to_sign|
+            sig = session.sign(data_to_sign, algorithm: algorithm)
+            # Request timestamp on the signature if needed
+            if timestamp
+              timestamp_token = request_timestamp(sig)
+            end
+            sig
+          end
+
+          signed_path = signable.apply_signature(
+            signing_callback,
+            certificate_chain,
+            timestamp_token: -> { timestamp_token }  # Lazy accessor since it's set in callback
+          )
+        else
+          # Standard flow for gem/zip files
+          content = signable.content_to_sign
+          signature = session.sign(content, algorithm: algorithm)
+
+          if timestamp
+            timestamp_token = request_timestamp(signature)
+          end
+
+          signed_path = signable.apply_signature(signature, certificate_chain, timestamp_token: timestamp_token)
+        end
 
         SigningResult.new(
           file_path: signed_path,
@@ -94,9 +108,11 @@ module EasyCodeSign
         Signable::GemFile.new(file_path, **options)
       when ".zip", ".jar", ".apk", ".war", ".ear"
         Signable::ZipFile.new(file_path, **options)
+      when ".pdf"
+        Signable::PdfFile.new(file_path, **options)
       else
         raise InvalidFileError, "Unsupported file type: #{extension}. " \
-                                "Supported: .gem, .zip, .jar, .apk, .war, .ear"
+                                "Supported: .gem, .zip, .jar, .apk, .war, .ear, .pdf"
       end
     end
 

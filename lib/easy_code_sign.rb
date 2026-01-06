@@ -9,6 +9,9 @@ require_relative "easy_code_sign/providers/safenet"
 require_relative "easy_code_sign/signable/base"
 require_relative "easy_code_sign/signable/gem_file"
 require_relative "easy_code_sign/signable/zip_file"
+require_relative "easy_code_sign/signable/pdf_file"
+require_relative "easy_code_sign/pdf/timestamp_handler"
+require_relative "easy_code_sign/pdf/appearance_builder"
 require_relative "easy_code_sign/timestamp/request"
 require_relative "easy_code_sign/timestamp/response"
 require_relative "easy_code_sign/timestamp/client"
@@ -120,6 +123,8 @@ module EasyCodeSign
         Signable::GemFile.new(file_path, **options)
       when ".zip", ".jar", ".apk", ".war", ".ear"
         Signable::ZipFile.new(file_path, **options)
+      when ".pdf"
+        Signable::PdfFile.new(file_path, **options)
       else
         raise InvalidFileError, "Unsupported file type: #{extension}"
       end

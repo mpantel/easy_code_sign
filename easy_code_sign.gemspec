@@ -8,9 +8,10 @@ Gem::Specification.new do |spec|
   spec.authors = ["michail"]
   spec.email = ["mpantel@aegean.gr"]
 
-  spec.summary = "Sign and verify Ruby gems and ZIP files using hardware security tokens"
+  spec.summary = "Sign and verify Ruby gems, ZIP files, and PDFs using hardware security tokens"
   spec.description = "A Ruby gem for code signing operations using hardware tokens (HSM/smart cards) " \
-                     "via PKCS#11. Supports SafeNet eToken, RFC 3161 timestamping, and signature verification."
+                     "via PKCS#11. Supports SafeNet eToken, RFC 3161 timestamping, PDF visible signatures, " \
+                     "and signature verification."
   spec.homepage = "https://github.com/mpantel/easy_code_sign"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.2.0"
@@ -33,6 +34,7 @@ Gem::Specification.new do |spec|
 
   # Runtime dependencies
   spec.add_dependency "base64", "~> 0.2"
+  spec.add_dependency "hexapdf", "~> 1.0"
   spec.add_dependency "pkcs11", "~> 0.3"
   spec.add_dependency "rubyzip", "~> 2.3"
   spec.add_dependency "thor", "~> 1.3"
