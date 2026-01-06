@@ -1,0 +1,7 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "easy_code_sign"
+require "easy_code_sign/cli"
+
+EasyCodeSign::CLI.start(ARGV)
