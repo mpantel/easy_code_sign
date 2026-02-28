@@ -77,6 +77,52 @@ module EasyCodeSign
       end
     end
 
+    # Phase 1 of deferred PDF signing: prepare a PDF with a placeholder signature
+    # and return a DeferredSigningRequest containing the digest to be signed externally.
+    #
+    # Requires a hardware token session (PIN) to retrieve the signing certificate.
+    #
+    # @param file_path [String] path to the PDF
+    # @param pin [String, nil] PIN for hardware token
+    # @param digest_algorithm [String] hash algorithm ("sha256", "sha384", "sha512")
+    # @param timestamp [Boolean] whether to reserve space for a timestamp
+    # @return [DeferredSigningRequest]
+    def prepare_pdf(file_path, pin: nil, digest_algorithm: "sha256", timestamp: false, **extra_options)
+      signable = Signable::PdfFile.new(file_path, **extra_options)
+      timestamp_size = timestamp ? 4096 : 0
+
+      provider.with_session(pin: pin) do |session|
+        certificate_chain = session.certificate_chain
+
+        signable.prepare_deferred(
+          certificate_chain.first,
+          certificate_chain,
+          digest_algorithm: digest_algorithm,
+          timestamp_size: timestamp_size
+        )
+      end
+    end
+
+    # Phase 2 of deferred PDF signing: embed an externally-produced signature
+    # into the prepared PDF. No hardware token needed.
+    #
+    # @param deferred_request [DeferredSigningRequest] from Phase 1
+    # @param raw_signature [String] raw signature bytes from the external signer
+    # @return [SigningResult]
+    def finalize_pdf(deferred_request, raw_signature)
+      signable = Signable::PdfFile.new(deferred_request.prepared_pdf_path)
+
+      signed_path = signable.finalize_deferred(deferred_request, raw_signature)
+
+      SigningResult.new(
+        file_path: signed_path,
+        certificate: deferred_request.certificate,
+        algorithm: :"#{deferred_request.digest_algorithm}_rsa",
+        timestamp_token: nil,
+        signed_at: deferred_request.signing_time
+      )
+    end
+
     # Sign multiple files
     #
     # @param file_paths [Array<String>] paths to files to sign

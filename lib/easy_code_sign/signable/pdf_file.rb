@@ -107,6 +107,118 @@ module EasyCodeSign
         out_path
       end
 
+      # Phase 1 of deferred signing: prepare PDF with placeholder signature,
+      # capture the digest that needs to be signed externally.
+      #
+      # HexaPDF builds the CMS signed attributes internally (since certificate IS set).
+      # The external_signing lambda receives (digest_algorithm, hash) where hash is the
+      # digest of the DER-encoded signed attributes — exactly what the external signer
+      # must sign. We capture it and return "" to leave the /Contents zero-filled.
+      #
+      # @param certificate [OpenSSL::X509::Certificate] signing certificate
+      # @param certificate_chain [Array<OpenSSL::X509::Certificate>] full chain
+      # @param digest_algorithm [String] "sha256", "sha384", or "sha512"
+      # @param timestamp_size [Integer] extra bytes to reserve for timestamp (0 if none)
+      # @return [DeferredSigningRequest]
+      def prepare_deferred(certificate, certificate_chain, digest_algorithm: "sha256", timestamp_size: 0)
+        captured_digest = nil
+        captured_algorithm = nil
+        signing_time = Time.now
+
+        external_signing = lambda do |algo, hash|
+          captured_algorithm = algo
+          captured_digest = hash
+          "" # Empty string signals async to HexaPDF
+        end
+
+        estimated_size = calculate_deferred_signature_size(certificate_chain, timestamp_size)
+
+        document = HexaPDF::Document.open(file_path)
+        handler = document.signatures.signing_handler(
+          certificate: certificate,
+          certificate_chain: certificate_chain[1..] || [],
+          external_signing: external_signing,
+          digest_algorithm: digest_algorithm,
+          signature_size: estimated_size,
+          signing_time: signing_time,
+          reason: @signature_config[:reason],
+          location: @signature_config[:location],
+          contact_info: @signature_config[:contact_info]
+        )
+
+        prepared_path = deferred_output_path
+        document.signatures.add(prepared_path, handler)
+
+        # Read back the ByteRange from the prepared PDF
+        byte_range = read_byte_range(prepared_path)
+
+        DeferredSigningRequest.new(
+          digest: captured_digest,
+          digest_algorithm: captured_algorithm,
+          prepared_pdf_path: prepared_path,
+          byte_range: byte_range,
+          certificate: certificate,
+          certificate_chain: certificate_chain,
+          estimated_size: estimated_size,
+          signing_time: signing_time
+        )
+      rescue HexaPDF::Error => e
+        raise DeferredSigningError, "Failed to prepare PDF for deferred signing: #{e.message}"
+      end
+
+      # Phase 2 of deferred signing: rebuild CMS with the real signature and embed it.
+      #
+      # Re-reads the ByteRange content from the prepared PDF, invokes SignedDataCreator
+      # with the same parameters as Phase 1 (including signing_time for determinism),
+      # and the block returns the actual raw signature. The resulting CMS DER is embedded
+      # into the prepared PDF via Signing.embed_signature.
+      #
+      # @param deferred_request [DeferredSigningRequest] from Phase 1
+      # @param raw_signature [String] raw signature bytes from external signer
+      # @return [String] path to the finalized signed PDF
+      def finalize_deferred(deferred_request, raw_signature)
+        prepared_path = deferred_request.prepared_pdf_path
+        unless File.exist?(prepared_path)
+          raise DeferredSigningError, "Prepared PDF not found: #{prepared_path}"
+        end
+
+        byte_range = deferred_request.byte_range
+
+        # Read ByteRange content from the prepared PDF
+        data = File.open(prepared_path, "rb") do |f|
+          f.pos = byte_range[0]
+          content = f.read(byte_range[1])
+          f.pos = byte_range[2]
+          content << f.read(byte_range[3])
+        end
+
+        # Rebuild the CMS structure with the actual signature
+        signing_block = lambda do |_digest_algorithm, _hash|
+          raw_signature
+        end
+
+        cms = HexaPDF::DigitalSignature::Signing::SignedDataCreator.create(
+          data,
+          type: :cms,
+          certificate: deferred_request.certificate,
+          digest_algorithm: deferred_request.digest_algorithm.to_s,
+          signing_time: deferred_request.signing_time,
+          certificates: deferred_request.certificate_chain[1..] || [],
+          &signing_block
+        )
+
+        cms_der = cms.to_der
+
+        # Embed the real signature into the prepared PDF
+        File.open(prepared_path, "rb+") do |io|
+          HexaPDF::DigitalSignature::Signing.embed_signature(io, cms_der)
+        end
+
+        prepared_path
+      rescue HexaPDF::Error => e
+        raise DeferredSigningError, "Failed to finalize deferred signature: #{e.message}"
+      end
+
       # Extract existing signature from PDF
       # @return [Hash, nil] signature data or nil if unsigned
       def extract_signature
@@ -115,9 +227,8 @@ module EasyCodeSign
         signatures = doc.signatures.each.to_a
         return nil if signatures.empty?
 
-        # Return the last (most recent) signature
-        sig = signatures.last
-        sig_dict = sig[:V]
+        # HexaPDF's signatures.each yields the Sig dictionary directly
+        sig_dict = signatures.last
 
         return nil unless sig_dict
 
@@ -207,6 +318,25 @@ module EasyCodeSign
         else
           [box.width - margin - width, margin, box.width - margin, margin + height]
         end
+      end
+
+      def calculate_deferred_signature_size(certificate_chain, timestamp_size)
+        base_size = 8192
+        cert_size = certificate_chain.sum { |c| c.to_der.bytesize }
+        base_size + cert_size + timestamp_size
+      end
+
+      def deferred_output_path
+        dir = File.dirname(file_path)
+        base = File.basename(file_path, File.extname(file_path))
+        File.join(dir, "#{base}_prepared.pdf")
+      end
+
+      def read_byte_range(pdf_path)
+        doc = HexaPDF::Document.open(pdf_path)
+        sig = doc.signatures.each.to_a.last
+        sig_dict = sig.is_a?(Hash) ? sig : sig
+        sig_dict[:ByteRange]&.value
       end
 
       def calculate_signature_size(certificate_chain, timestamp_token)

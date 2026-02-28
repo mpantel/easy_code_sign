@@ -107,4 +107,7 @@ module EasyCodeSign
 
   # Raised when ByteRange calculation or verification fails
   class ByteRangeError < PdfError; end
+
+  # Raised when deferred (two-phase) PDF signing fails
+  class DeferredSigningError < PdfError; end
 end

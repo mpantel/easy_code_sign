@@ -175,6 +175,112 @@ module EasyCodeSign
       exit 1
     end
 
+    desc "prepare-pdf FILE", "Prepare a PDF for deferred (two-phase) signing"
+    long_desc <<~DESC
+      Phase 1 of deferred PDF signing.
+
+      Prepares the PDF with a placeholder signature and outputs the digest
+      that must be signed by an external signer (Fortify, WebCrypto, remote HSM).
+
+      The prepared PDF and a JSON request file are written alongside the input.
+      Send the digest to your external signing service, then use finalize-pdf
+      to embed the real signature.
+    DESC
+    option :algorithm, type: :string, default: "sha256", desc: "Hash algorithm (sha256, sha384, sha512)"
+    option :timestamp, type: :boolean, default: false, aliases: "-t", desc: "Reserve space for timestamp"
+    option :provider, type: :string, default: "safenet", desc: "Token provider (safenet)"
+    option :library, type: :string, desc: "Path to PKCS#11 library"
+    option :slot, type: :numeric, default: 0, desc: "Token slot index"
+    option :json, type: :boolean, default: false, desc: "Output result as JSON"
+    option :signature_reason, type: :string, desc: "[PDF] Reason for signing"
+    option :signature_location, type: :string, desc: "[PDF] Location of signing"
+    def prepare_pdf(file)
+      configure_from_options
+
+      pin = prompt_for_pin
+
+      say "Preparing #{file} for deferred signing...", :cyan unless options[:quiet]
+
+      prepare_opts = {
+        pin: pin,
+        digest_algorithm: options[:algorithm],
+        timestamp: options[:timestamp],
+        signature_reason: options[:signature_reason],
+        signature_location: options[:signature_location]
+      }.compact
+
+      request = EasyCodeSign.prepare_pdf(file, **prepare_opts)
+
+      # Write request JSON for later use
+      request_path = "#{request.prepared_pdf_path}.json"
+      require "json"
+      File.write(request_path, JSON.pretty_generate(request.to_h))
+
+      if options[:json]
+        say JSON.pretty_generate(request.to_h)
+      else
+        say "Prepared: #{request.prepared_pdf_path}", :green unless options[:quiet]
+        say "Request saved: #{request_path}" unless options[:quiet]
+        say "" unless options[:quiet]
+        say "Digest (hex):    #{request.digest_hex}" unless options[:quiet]
+        say "Digest (base64): #{request.digest_base64}" unless options[:quiet]
+        say "" unless options[:quiet]
+        say "Sign the digest externally, then run:", :cyan unless options[:quiet]
+        say "  easysign finalize-pdf #{request.prepared_pdf_path} SIGNATURE_FILE" unless options[:quiet]
+      end
+    rescue EasyCodeSign::Error => e
+      say_error "Prepare failed: #{e.message}"
+      exit 1
+    end
+
+    desc "finalize-pdf PREPARED_PDF SIGNATURE_FILE", "Finalize a deferred PDF signature"
+    long_desc <<~DESC
+      Phase 2 of deferred PDF signing.
+
+      Reads the prepared PDF and its accompanying .json request file, then
+      embeds the raw signature from SIGNATURE_FILE into the PDF.
+
+      SIGNATURE_FILE should contain the raw signature bytes (binary DER) produced
+      by signing the digest from the prepare-pdf step.
+    DESC
+    option :request_json, type: :string, desc: "Path to request JSON (default: PREPARED_PDF.json)"
+    def finalize_pdf(prepared_pdf, signature_file)
+      require "json"
+
+      request_path = options[:request_json] || "#{prepared_pdf}.json"
+      unless File.exist?(request_path)
+        say_error "Request file not found: #{request_path}"
+        say_error "Specify --request-json or ensure the .json file from prepare-pdf exists"
+        exit 1
+      end
+
+      unless File.exist?(signature_file)
+        say_error "Signature file not found: #{signature_file}"
+        exit 1
+      end
+
+      say "Finalizing deferred signature on #{prepared_pdf}...", :cyan unless options[:quiet]
+
+      request_hash = JSON.parse(File.read(request_path))
+      request = EasyCodeSign::DeferredSigningRequest.from_h(request_hash)
+      raw_signature = File.binread(signature_file)
+
+      result = EasyCodeSign.finalize_pdf(request, raw_signature)
+
+      if options[:verbose]
+        say "\nSigning complete:", :green
+        say "  File: #{result.file_path}"
+        say "  Signer: #{result.signer_name}"
+        say "  Algorithm: #{result.algorithm}"
+        say "  Signed at: #{result.signed_at}"
+      else
+        say "Signed: #{result.file_path}", :green unless options[:quiet]
+      end
+    rescue EasyCodeSign::Error => e
+      say_error "Finalize failed: #{e.message}"
+      exit 1
+    end
+
     desc "info FILE", "Show signature information for a signed file"
     long_desc <<~DESC
       Display detailed information about a file's signature without
