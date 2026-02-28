@@ -95,4 +95,19 @@ module EasyCodeSign
 
   # Raised when a required timestamp is missing
   class MissingTimestampError < TimestampError; end
+
+  # Base class for PDF-related errors
+  class PdfError < SigningError; end
+
+  # Raised when the PDF file is invalid or cannot be parsed
+  class InvalidPdfError < PdfError; end
+
+  # Raised when PDF signature operations fail
+  class PdfSignatureError < PdfError; end
+
+  # Raised when ByteRange calculation or verification fails
+  class ByteRangeError < PdfError; end
+
+  # Raised when deferred (two-phase) PDF signing fails
+  class DeferredSigningError < PdfError; end
 end

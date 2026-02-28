@@ -9,6 +9,9 @@ require_relative "easy_code_sign/providers/safenet"
 require_relative "easy_code_sign/signable/base"
 require_relative "easy_code_sign/signable/gem_file"
 require_relative "easy_code_sign/signable/zip_file"
+require_relative "easy_code_sign/signable/pdf_file"
+require_relative "easy_code_sign/pdf/timestamp_handler"
+require_relative "easy_code_sign/pdf/appearance_builder"
 require_relative "easy_code_sign/timestamp/request"
 require_relative "easy_code_sign/timestamp/response"
 require_relative "easy_code_sign/timestamp/client"
@@ -17,6 +20,7 @@ require_relative "easy_code_sign/verification/result"
 require_relative "easy_code_sign/verification/trust_store"
 require_relative "easy_code_sign/verification/certificate_chain"
 require_relative "easy_code_sign/verification/signature_checker"
+require_relative "easy_code_sign/deferred_signing_request"
 require_relative "easy_code_sign/signer"
 require_relative "easy_code_sign/verifier"
 
@@ -90,6 +94,42 @@ module EasyCodeSign
       verifier.verify(file_path, check_timestamp: check_timestamp)
     end
 
+    # Phase 1 of deferred PDF signing.
+    # Prepares a PDF with placeholder signature and returns a DeferredSigningRequest
+    # containing the digest to be signed by an external signer (Fortify, WebCrypto, etc.).
+    #
+    # @param file_path [String] path to the PDF
+    # @param pin [String, nil] PIN for hardware token (needed for certificate retrieval)
+    # @param digest_algorithm [String] "sha256", "sha384", or "sha512"
+    # @param timestamp [Boolean] whether to reserve timestamp space
+    # @return [DeferredSigningRequest]
+    #
+    # @example
+    #   request = EasyCodeSign.prepare_pdf("document.pdf", pin: "1234")
+    #   request.digest_base64 #=> "abc123..."  (send to external signer)
+    #
+    def prepare_pdf(file_path, pin: nil, digest_algorithm: "sha256", timestamp: false, **extra_options)
+      signer = Signer.new
+      signer.prepare_pdf(file_path, pin: pin, digest_algorithm: digest_algorithm,
+                                    timestamp: timestamp, **extra_options)
+    end
+
+    # Phase 2 of deferred PDF signing.
+    # Embeds an externally-produced raw signature into the prepared PDF.
+    #
+    # @param deferred_request [DeferredSigningRequest] from prepare_pdf
+    # @param raw_signature [String] raw signature bytes from external signer
+    # @return [SigningResult]
+    #
+    # @example
+    #   result = EasyCodeSign.finalize_pdf(request, raw_signature)
+    #   result.file_path #=> "document_prepared.pdf"
+    #
+    def finalize_pdf(deferred_request, raw_signature, **options)
+      signer = Signer.new
+      signer.finalize_pdf(deferred_request, raw_signature, **options)
+    end
+
     # Create a verifier instance for batch operations
     # @param trust_store [Verification::TrustStore, nil]
     # @return [Verifier]
@@ -120,6 +160,8 @@ module EasyCodeSign
         Signable::GemFile.new(file_path, **options)
       when ".zip", ".jar", ".apk", ".war", ".ear"
         Signable::ZipFile.new(file_path, **options)
+      when ".pdf"
+        Signable::PdfFile.new(file_path, **options)
       else
         raise InvalidFileError, "Unsupported file type: #{extension}"
       end

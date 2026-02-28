@@ -1,0 +1,58 @@
+{
+  "manifest_version": 3,
+  "name": "EasySign PDF Signer",
+  "version": "1.0.0",
+  "description": "Sign PDF documents using hardware security tokens (HSM/smart cards)",
+
+  "permissions": [
+    "nativeMessaging",
+    "storage"
+  ],
+
+  "host_permissions": [
+    "https://*/*",
+    "http://localhost/*"
+  ],
+
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["https://*/*", "http://localhost/*"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+
+  "web_accessible_resources": [
+    {
+      "resources": ["inject.js"],
+      "matches": ["https://*/*", "http://localhost/*"]
+    }
+  ],
+
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "default_title": "EasySign PDF Signer"
+  },
+
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+
+  "options_ui": {
+    "page": "popup/popup.html",
+    "open_in_tab": false
+  }
+}

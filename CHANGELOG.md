@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **PDF Document Signing**
+  - Sign PDF documents (.pdf) with PKCS#7 digital signatures
+  - Visible signature annotations with customizable position (top-left, top-right, bottom-left, bottom-right)
+  - Signature metadata (reason, location, contact info)
+  - Page selection for signature placement
+  - RFC 3161 timestamp embedding in PDF signatures
+  - ByteRange-based signing for PDF incremental updates
+
+- **PDF Verification**
+  - Verify signed PDF documents
+  - ByteRange integrity checking
+  - Extract and display PDF signature metadata
+
+- **CLI Enhancements for PDF**
+  - `--visible-signature` - Add visible signature annotation
+  - `--signature-page` - Select page for signature
+  - `--signature-position` - Position preset (top_left, top_right, bottom_left, bottom_right)
+  - `--signature-reason` - Reason for signing
+  - `--signature-location` - Signing location
+
+### Dependencies
+
+- Added HexaPDF (~> 1.0) for PDF manipulation and signing
+
 ## [0.1.0] - 2025-01-06
 
 ### Added

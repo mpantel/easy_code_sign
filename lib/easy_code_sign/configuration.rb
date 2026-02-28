@@ -59,7 +59,7 @@ module EasyCodeSign
       @provider = :safenet
       @pkcs11_library = default_pkcs11_library
       @slot_index = 0
-      @timestamp_authority = nil
+      @timestamp_authority = ENV["EASYSIGN_TSA_URL"]
       @timestamp_hash_algorithm = :sha256
       @require_timestamp = false
       @trust_store_path = nil

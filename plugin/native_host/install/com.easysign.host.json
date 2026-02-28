@@ -1,0 +1,9 @@
+{
+  "name": "com.easysign.host",
+  "description": "EasySign PDF Signing Native Host",
+  "path": "{{HOST_PATH}}",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://{{EXTENSION_ID}}/"
+  ]
+}

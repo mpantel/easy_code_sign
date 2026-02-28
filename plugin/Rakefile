@@ -1,0 +1,121 @@
+# frozen_string_literal: true
+
+require "bundler/setup"
+require "opal"
+require "fileutils"
+
+DIST_DIR = File.expand_path("dist", __dir__)
+SRC_DIR = File.expand_path("src", __dir__)
+
+desc "Build all extension components"
+task build: ["build:background", "build:content", "build:inject", "build:popup", "build:manifest", "build:assets"]
+
+namespace :build do
+  desc "Build background service worker"
+  task :background do
+    puts "Building background.js..."
+    compile_opal("easy_sign/background", "background.js")
+  end
+
+  desc "Build content script"
+  task :content do
+    puts "Building content.js..."
+    compile_opal("easy_sign/content", "content.js")
+  end
+
+  desc "Build injected page script"
+  task :inject do
+    puts "Building inject.js..."
+    compile_opal("easy_sign/inject", "inject.js")
+  end
+
+  desc "Build popup script"
+  task :popup do
+    puts "Building popup.js..."
+    compile_opal("easy_sign/popup", "popup/popup.js")
+
+    # Copy popup HTML and CSS
+    FileUtils.mkdir_p("#{DIST_DIR}/popup")
+    FileUtils.cp("templates/popup.html", "#{DIST_DIR}/popup/popup.html")
+    FileUtils.cp("templates/popup.css", "#{DIST_DIR}/popup/popup.css")
+  end
+
+  desc "Copy manifest.json"
+  task :manifest do
+    puts "Copying manifest.json..."
+    FileUtils.mkdir_p(DIST_DIR)
+    FileUtils.cp("templates/manifest.json", "#{DIST_DIR}/manifest.json")
+  end
+
+  desc "Copy static assets (icons, etc)"
+  task :assets do
+    puts "Copying assets..."
+    FileUtils.mkdir_p("#{DIST_DIR}/icons")
+    if Dir.exist?("assets/icons")
+      FileUtils.cp_r("assets/icons/.", "#{DIST_DIR}/icons/")
+    end
+  end
+end
+
+desc "Watch for changes and rebuild"
+task :watch do
+  require "listen"
+
+  puts "Watching for changes in src/ and templates/..."
+
+  listener = Listen.to(SRC_DIR, "templates") do |modified, added, removed|
+    puts "\nChanges detected: #{(modified + added + removed).join(', ')}"
+    Rake::Task["build"].reenable
+    Rake::Task["build"].invoke
+    puts "Rebuild complete."
+  end
+
+  listener.start
+  puts "Press Ctrl+C to stop."
+  sleep
+end
+
+desc "Clean dist directory"
+task :clean do
+  puts "Cleaning dist/..."
+  FileUtils.rm_rf(Dir.glob("#{DIST_DIR}/*"))
+  puts "Clean complete."
+end
+
+desc "Run tests"
+task :test do
+  require "minitest/autorun"
+  Dir.glob("test/**/*_test.rb").each { |f| require_relative f }
+end
+
+# Development server for testing
+desc "Start a simple HTTP server for testing"
+task :server do
+  require "webrick"
+  server = WEBrick::HTTPServer.new(Port: 8080, DocumentRoot: DIST_DIR)
+  trap("INT") { server.shutdown }
+  puts "Serving dist/ at http://localhost:8080"
+  server.start
+end
+
+def compile_opal(entry_point, output_file)
+  # Create a fresh builder with custom paths
+  builder = Opal::Builder.new(
+    stubs: [],
+    compiler_options: {
+      dynamic_require_severity: :ignore
+    }
+  )
+
+  # Add source directory to builder's path
+  builder.append_paths(SRC_DIR)
+
+  # Build the entry point
+  builder.build(entry_point)
+
+  output_path = File.join(DIST_DIR, output_file)
+  FileUtils.mkdir_p(File.dirname(output_path))
+
+  File.write(output_path, builder.to_s)
+  puts "  -> #{output_path} (#{File.size(output_path)} bytes)"
+end

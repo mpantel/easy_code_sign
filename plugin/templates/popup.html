@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EasySign - Enter PIN</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <div class="logo">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M9 12L11 14L15 10M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span>EasySign</span>
+      </div>
+    </header>
+
+    <main class="main">
+      <h2>Sign Document</h2>
+
+      <div class="context">
+        <div class="context-row">
+          <span class="context-label">Website:</span>
+          <span id="origin-text" class="context-value">-</span>
+        </div>
+        <div class="context-row">
+          <span id="status-text" class="context-value status">Ready to sign</span>
+        </div>
+      </div>
+
+      <div class="form">
+        <label for="pin-input" class="label">Enter your token PIN:</label>
+        <input
+          type="password"
+          id="pin-input"
+          class="pin-input"
+          placeholder="PIN"
+          autocomplete="off"
+          autofocus
+        >
+        <div id="error-text" class="error" style="display: none;"></div>
+      </div>
+
+      <div class="actions">
+        <button id="cancel-btn" class="btn btn-secondary">Cancel</button>
+        <button id="submit-btn" class="btn btn-primary">Sign</button>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <span class="footer-text">Your PIN is never stored</span>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
