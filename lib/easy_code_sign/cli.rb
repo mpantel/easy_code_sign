@@ -243,6 +243,8 @@ module EasyCodeSign
       SIGNATURE_FILE should contain the raw signature bytes (binary DER) produced
       by signing the digest from the prepare-pdf step.
     DESC
+    option :timestamp, type: :boolean, default: false, aliases: "-t", desc: "Add RFC 3161 timestamp"
+    option :tsa, type: :string, desc: "Timestamp authority URL"
     option :request_json, type: :string, desc: "Path to request JSON (default: PREPARED_PDF.json)"
     def finalize_pdf(prepared_pdf, signature_file)
       require "json"
@@ -259,19 +261,22 @@ module EasyCodeSign
         exit 1
       end
 
+      configure_from_options
+
       say "Finalizing deferred signature on #{prepared_pdf}...", :cyan unless options[:quiet]
 
       request_hash = JSON.parse(File.read(request_path))
       request = EasyCodeSign::DeferredSigningRequest.from_h(request_hash)
       raw_signature = File.binread(signature_file)
 
-      result = EasyCodeSign.finalize_pdf(request, raw_signature)
+      result = EasyCodeSign.finalize_pdf(request, raw_signature, timestamp: options[:timestamp])
 
       if options[:verbose]
         say "\nSigning complete:", :green
         say "  File: #{result.file_path}"
         say "  Signer: #{result.signer_name}"
         say "  Algorithm: #{result.algorithm}"
+        say "  Timestamped: #{result.timestamped? ? 'Yes' : 'No'}"
         say "  Signed at: #{result.signed_at}"
       else
         say "Signed: #{result.file_path}", :green unless options[:quiet]

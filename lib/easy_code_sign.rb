@@ -125,9 +125,9 @@ module EasyCodeSign
     #   result = EasyCodeSign.finalize_pdf(request, raw_signature)
     #   result.file_path #=> "document_prepared.pdf"
     #
-    def finalize_pdf(deferred_request, raw_signature)
+    def finalize_pdf(deferred_request, raw_signature, **options)
       signer = Signer.new
-      signer.finalize_pdf(deferred_request, raw_signature)
+      signer.finalize_pdf(deferred_request, raw_signature, **options)
     end
 
     # Create a verifier instance for batch operations

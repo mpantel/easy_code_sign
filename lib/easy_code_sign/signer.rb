@@ -109,16 +109,22 @@ module EasyCodeSign
     # @param deferred_request [DeferredSigningRequest] from Phase 1
     # @param raw_signature [String] raw signature bytes from the external signer
     # @return [SigningResult]
-    def finalize_pdf(deferred_request, raw_signature)
+    def finalize_pdf(deferred_request, raw_signature, timestamp: nil, timestamp_token: nil)
+      timestamp = configuration.require_timestamp if timestamp.nil?
+
+      if timestamp && timestamp_token.nil?
+        timestamp_token = request_timestamp(raw_signature)
+      end
+
       signable = Signable::PdfFile.new(deferred_request.prepared_pdf_path)
 
-      signed_path = signable.finalize_deferred(deferred_request, raw_signature)
+      signed_path = signable.finalize_deferred(deferred_request, raw_signature, timestamp_token: timestamp_token)
 
       SigningResult.new(
         file_path: signed_path,
         certificate: deferred_request.certificate,
         algorithm: :"#{deferred_request.digest_algorithm}_rsa",
-        timestamp_token: nil,
+        timestamp_token: timestamp_token,
         signed_at: deferred_request.signing_time
       )
     end

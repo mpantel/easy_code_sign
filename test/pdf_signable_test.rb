@@ -352,6 +352,50 @@ class PdfDeferredSigningTest < EasyCodeSignTest
     end
   end
 
+  def test_finalize_deferred_with_timestamp_embeds_token
+    signable = EasyCodeSign::Signable::PdfFile.new(@temp_pdf.path)
+    request = signable.prepare_deferred(@cert, @chain, timestamp_size: 4096)
+    track_prepared(request)
+
+    raw_signature = @key.sign_raw("sha256", request.digest)
+    mock_token = create_mock_timestamp_token
+
+    finalizer = EasyCodeSign::Signable::PdfFile.new(request.prepared_pdf_path)
+    signed_path = finalizer.finalize_deferred(request, raw_signature, timestamp_token: mock_token)
+
+    assert File.exist?(signed_path)
+
+    # Parse the CMS from the signed PDF and check for timestamp unsigned attribute
+    verifier_signable = EasyCodeSign::Signable::PdfFile.new(signed_path)
+    sig = verifier_signable.extract_signature
+    refute_nil sig, "Expected signed PDF to have a signature"
+
+    # Decode the CMS DER (trimming zero-padding) and look for id-aa-timeStampToken OID
+    cms_asn1 = decode_cms_from_contents(sig[:contents])
+    assert_timestamp_attribute_present(cms_asn1)
+  end
+
+  def test_finalize_deferred_without_timestamp_unchanged
+    signable = EasyCodeSign::Signable::PdfFile.new(@temp_pdf.path)
+    request = signable.prepare_deferred(@cert, @chain)
+    track_prepared(request)
+
+    raw_signature = @key.sign_raw("sha256", request.digest)
+
+    finalizer = EasyCodeSign::Signable::PdfFile.new(request.prepared_pdf_path)
+    signed_path = finalizer.finalize_deferred(request, raw_signature)
+
+    assert File.exist?(signed_path)
+
+    verifier_signable = EasyCodeSign::Signable::PdfFile.new(signed_path)
+    sig = verifier_signable.extract_signature
+    refute_nil sig
+
+    # Verify no timestamp unsigned attribute is present
+    cms_asn1 = decode_cms_from_contents(sig[:contents])
+    refute_timestamp_attribute_present(cms_asn1)
+  end
+
   private
 
   def track_prepared(request)
@@ -377,6 +421,95 @@ class PdfDeferredSigningTest < EasyCodeSignTest
     cert.not_after = Time.now + 86_400
     cert.sign(key, OpenSSL::Digest.new("SHA256"))
     cert
+  end
+
+  def create_mock_timestamp_token
+    # Build a minimal self-signed PKCS#7 structure as mock token DER
+    tsa_key = OpenSSL::PKey::RSA.new(2048)
+    tsa_cert = OpenSSL::X509::Certificate.new
+    tsa_cert.version = 2
+    tsa_cert.serial = 99
+    tsa_cert.subject = OpenSSL::X509::Name.parse("/CN=Mock TSA")
+    tsa_cert.issuer = tsa_cert.subject
+    tsa_cert.public_key = tsa_key.public_key
+    tsa_cert.not_before = Time.now
+    tsa_cert.not_after = Time.now + 86_400
+    tsa_cert.sign(tsa_key, OpenSSL::Digest.new("SHA256"))
+
+    pkcs7 = OpenSSL::PKCS7.sign(tsa_cert, tsa_key, "mock timestamp data",
+                                 [], OpenSSL::PKCS7::DETACHED | OpenSSL::PKCS7::BINARY)
+
+    EasyCodeSign::Timestamp::TimestampToken.new(
+      token_der: pkcs7.to_der,
+      timestamp: Time.now,
+      serial_number: 99,
+      policy_oid: "1.2.3.4",
+      tsa_url: "http://test.tsa"
+    )
+  end
+
+  # Decode CMS DER from PDF /Contents (which may have trailing zero-padding)
+  def decode_cms_from_contents(contents)
+    # The PDF reserves a fixed-size space; trailing zeros must be stripped.
+    # Parse just the first valid DER structure using decode_all which ignores trailing data.
+    OpenSSL::ASN1.decode(contents.sub(/\x00+\z/, ""))
+  end
+
+  # Recursively search the ASN.1 tree for the id-aa-timeStampToken OID
+  TIMESTAMP_TOKEN_OID = "1.2.840.113549.1.9.16.2.14"
+
+  def find_oid_in_asn1(asn1, target_oid)
+    if asn1.is_a?(OpenSSL::ASN1::ObjectId) && asn1.oid == target_oid
+      return true
+    end
+
+    if asn1.respond_to?(:value) && asn1.value.is_a?(Array)
+      asn1.value.any? { |child| find_oid_in_asn1(child, target_oid) }
+    else
+      false
+    end
+  end
+
+  def assert_timestamp_attribute_present(cms_asn1)
+    assert find_oid_in_asn1(cms_asn1, TIMESTAMP_TOKEN_OID),
+           "Expected CMS to contain id-aa-timeStampToken unsigned attribute"
+  end
+
+  def refute_timestamp_attribute_present(cms_asn1)
+    refute find_oid_in_asn1(cms_asn1, TIMESTAMP_TOKEN_OID),
+           "Expected CMS NOT to contain id-aa-timeStampToken unsigned attribute"
+  end
+end
+
+class PdfTimestampHandlerTest < Minitest::Test
+  def test_sign_returns_token_der_from_eager_token
+    mock_token = Struct.new(:token_der).new("mock_der_bytes")
+    handler = EasyCodeSign::Pdf::TimestampHandler.new(mock_token)
+
+    result = handler.sign(StringIO.new, [0, 0, 0, 0])
+    assert_equal "mock_der_bytes", result
+  end
+
+  def test_sign_returns_token_der_from_lazy_proc
+    mock_token = Struct.new(:token_der).new("lazy_der_bytes")
+    handler = EasyCodeSign::Pdf::TimestampHandler.new(-> { mock_token })
+
+    result = handler.sign(StringIO.new, [0, 0, 0, 0])
+    assert_equal "lazy_der_bytes", result
+  end
+
+  def test_sign_returns_nil_when_token_is_nil
+    handler = EasyCodeSign::Pdf::TimestampHandler.new(nil)
+
+    result = handler.sign(StringIO.new, [0, 0, 0, 0])
+    assert_nil result
+  end
+
+  def test_sign_returns_nil_when_lazy_proc_returns_nil
+    handler = EasyCodeSign::Pdf::TimestampHandler.new(-> { nil })
+
+    result = handler.sign(StringIO.new, [0, 0, 0, 0])
+    assert_nil result
   end
 end
 

@@ -92,7 +92,8 @@ module EasyCodeSign
           reason: @signature_config[:reason],
           location: @signature_config[:location],
           contact_info: @signature_config[:contact_info],
-          signature_size: estimated_size
+          signature_size: estimated_size,
+          timestamp_handler: timestamp_token ? Pdf::TimestampHandler.new(timestamp_token) : nil
         )
 
         # Build visible appearance if configured
@@ -183,7 +184,7 @@ module EasyCodeSign
       # @param deferred_request [DeferredSigningRequest] from Phase 1
       # @param raw_signature [String] raw signature bytes from external signer
       # @return [String] path to the finalized signed PDF
-      def finalize_deferred(deferred_request, raw_signature)
+      def finalize_deferred(deferred_request, raw_signature, timestamp_token: nil)
         prepared_path = deferred_request.prepared_pdf_path
         unless File.exist?(prepared_path)
           raise DeferredSigningError, "Prepared PDF not found: #{prepared_path}"
@@ -204,15 +205,14 @@ module EasyCodeSign
           raw_signature
         end
 
-        cms = HexaPDF::DigitalSignature::Signing::SignedDataCreator.create(
-          data,
-          type: :cms,
-          certificate: deferred_request.certificate,
-          digest_algorithm: deferred_request.digest_algorithm.to_s,
-          signing_time: deferred_request.signing_time,
-          certificates: deferred_request.certificate_chain[1..] || [],
-          &signing_block
-        )
+        creator = HexaPDF::DigitalSignature::Signing::SignedDataCreator.new
+        creator.certificate = deferred_request.certificate
+        creator.digest_algorithm = deferred_request.digest_algorithm.to_s
+        creator.signing_time = deferred_request.signing_time
+        creator.certificates = deferred_request.certificate_chain[1..] || []
+        creator.timestamp_handler = Pdf::TimestampHandler.new(timestamp_token) if timestamp_token
+
+        cms = creator.create(data, type: :cms, &signing_block)
 
         cms_der = cms.to_der
 
