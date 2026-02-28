@@ -152,6 +152,12 @@ module EasyCodeSign
         # Read back the ByteRange from the prepared PDF
         byte_range = read_byte_range(prepared_path)
 
+        # Compute pre-hash signed attributes DER for WebCrypto compatibility
+        signed_attrs_der = compute_signed_attributes_data(
+          prepared_path, byte_range, certificate, certificate_chain,
+          digest_algorithm, signing_time
+        )
+
         DeferredSigningRequest.new(
           digest: captured_digest,
           digest_algorithm: captured_algorithm,
@@ -160,7 +166,8 @@ module EasyCodeSign
           certificate: certificate,
           certificate_chain: certificate_chain,
           estimated_size: estimated_size,
-          signing_time: signing_time
+          signing_time: signing_time,
+          signed_attributes_data: signed_attrs_der
         )
       rescue HexaPDF::Error => e
         raise DeferredSigningError, "Failed to prepare PDF for deferred signing: #{e.message}"
@@ -337,6 +344,33 @@ module EasyCodeSign
         sig = doc.signatures.each.to_a.last
         sig_dict = sig.is_a?(Hash) ? sig : sig
         sig_dict[:ByteRange]&.value
+      end
+
+      # Reconstruct the DER-encoded signed attributes from the prepared PDF.
+      # This is the pre-hash data that WebCrypto can hash-and-sign in one step.
+      # Invariant: SHA256(result) == captured_digest
+      def compute_signed_attributes_data(prepared_path, byte_range, certificate, certificate_chain,
+                                         digest_algorithm, signing_time)
+        # Read ByteRange content (same as finalize_deferred does)
+        data = File.open(prepared_path, "rb") do |f|
+          f.pos = byte_range[0]
+          content = f.read(byte_range[1])
+          f.pos = byte_range[2]
+          content << f.read(byte_range[3])
+        end
+
+        # Build a SignedDataCreator with the same params used in Phase 1
+        creator = HexaPDF::DigitalSignature::Signing::SignedDataCreator.new
+        creator.certificate = certificate
+        creator.digest_algorithm = digest_algorithm.to_s
+        creator.signing_time = signing_time
+        creator.certificates = certificate_chain[1..] || []
+
+        # Access the private method to get the ASN.1 signed attributes SET
+        signed_attrs = creator.send(:create_signed_attrs, data, signing_time: true)
+
+        # DER-encode the SET (mirrors line 113 of signed_data_creator.rb)
+        OpenSSL::ASN1::Set.new(signed_attrs.value).to_der
       end
 
       def calculate_signature_size(certificate_chain, timestamp_token)

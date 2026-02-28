@@ -26,11 +26,12 @@ module EasyCodeSign
                 :certificate_chain,
                 :estimated_size,
                 :signing_time,
-                :created_at
+                :created_at,
+                :signed_attributes_data
 
     def initialize(digest:, digest_algorithm:, prepared_pdf_path:, byte_range:,
                    certificate:, certificate_chain:, estimated_size:,
-                   signing_time:, created_at: Time.now)
+                   signing_time:, created_at: Time.now, signed_attributes_data: nil)
       @digest = digest
       @digest_algorithm = digest_algorithm.to_sym
       @prepared_pdf_path = prepared_pdf_path
@@ -40,6 +41,7 @@ module EasyCodeSign
       @estimated_size = estimated_size
       @signing_time = signing_time
       @created_at = created_at
+      @signed_attributes_data = signed_attributes_data
     end
 
     # Hex-encoded digest for display and CLI output
@@ -54,11 +56,19 @@ module EasyCodeSign
       Base64.strict_encode64(digest)
     end
 
+    # Base64-encoded signed attributes DER for WebCrypto hash-and-sign.
+    # Use this instead of digest_base64 when the signer hashes internally
+    # (e.g. crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, data)).
+    # @return [String, nil]
+    def signed_attributes_base64
+      signed_attributes_data && Base64.strict_encode64(signed_attributes_data)
+    end
+
     # Serialize to a Hash suitable for JSON transport.
     # Binary fields are Base64-encoded, certificates are PEM-encoded.
     # @return [Hash]
     def to_h
-      {
+      h = {
         "digest" => digest_base64,
         "digest_algorithm" => digest_algorithm.to_s,
         "prepared_pdf_path" => prepared_pdf_path,
@@ -69,6 +79,8 @@ module EasyCodeSign
         "signing_time" => signing_time.iso8601,
         "created_at" => created_at.iso8601
       }
+      h["signed_attributes_data"] = signed_attributes_base64 if signed_attributes_data
+      h
     end
 
     # Deserialize from a Hash (as produced by #to_h / JSON.parse).
@@ -84,7 +96,8 @@ module EasyCodeSign
         certificate_chain: hash["certificate_chain"].map { |pem| OpenSSL::X509::Certificate.new(pem) },
         estimated_size: hash["estimated_size"],
         signing_time: Time.parse(hash["signing_time"]),
-        created_at: Time.parse(hash["created_at"])
+        created_at: Time.parse(hash["created_at"]),
+        signed_attributes_data: hash["signed_attributes_data"] && Base64.strict_decode64(hash["signed_attributes_data"])
       )
     end
   end

@@ -267,6 +267,57 @@ class PdfDeferredSigningTest < EasyCodeSignTest
     refute_nil sig[:byte_range]
   end
 
+  def test_signed_attributes_data_present
+    signable = EasyCodeSign::Signable::PdfFile.new(@temp_pdf.path)
+    request = signable.prepare_deferred(@cert, @chain)
+    track_prepared(request)
+
+    refute_nil request.signed_attributes_data
+    refute_empty request.signed_attributes_data
+    refute_nil request.signed_attributes_base64
+  end
+
+  def test_signed_attributes_data_hash_matches_digest
+    signable = EasyCodeSign::Signable::PdfFile.new(@temp_pdf.path)
+    request = signable.prepare_deferred(@cert, @chain, digest_algorithm: "sha256")
+    track_prepared(request)
+
+    computed_hash = OpenSSL::Digest::SHA256.digest(request.signed_attributes_data)
+    assert_equal request.digest, computed_hash,
+                 "SHA256(signed_attributes_data) must equal the captured digest"
+  end
+
+  def test_webcrypto_style_signing_produces_valid_pdf
+    signable = EasyCodeSign::Signable::PdfFile.new(@temp_pdf.path)
+    request = signable.prepare_deferred(@cert, @chain)
+    track_prepared(request)
+
+    # Simulate WebCrypto: hash-and-sign in one step (like crypto.subtle.sign)
+    raw_signature = @key.sign("SHA256", request.signed_attributes_data)
+
+    finalizer = EasyCodeSign::Signable::PdfFile.new(request.prepared_pdf_path)
+    signed_path = finalizer.finalize_deferred(request, raw_signature)
+
+    assert File.exist?(signed_path)
+
+    verifier_signable = EasyCodeSign::Signable::PdfFile.new(signed_path)
+    sig = verifier_signable.extract_signature
+    refute_nil sig, "Expected signed PDF to have an extractable signature"
+    refute_nil sig[:contents]
+  end
+
+  def test_signed_attributes_data_serialization_roundtrip
+    signable = EasyCodeSign::Signable::PdfFile.new(@temp_pdf.path)
+    request = signable.prepare_deferred(@cert, @chain)
+    track_prepared(request)
+
+    hash = request.to_h
+    assert hash.key?("signed_attributes_data"), "to_h should include signed_attributes_data"
+
+    restored = EasyCodeSign::DeferredSigningRequest.from_h(hash)
+    assert_equal request.signed_attributes_data, restored.signed_attributes_data
+  end
+
   def test_finalize_deferred_raises_on_missing_pdf
     request = EasyCodeSign::DeferredSigningRequest.new(
       digest: "\x00" * 32,
