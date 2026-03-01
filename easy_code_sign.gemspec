@@ -34,7 +34,7 @@ Gem::Specification.new do |spec|
 
   # Runtime dependencies
   spec.add_dependency "base64", "~> 0.2"
-  spec.add_dependency "hexapdf", "~> 1.0"
+  spec.add_dependency "pdf-reader", "~> 2.0"   # MIT — used by native PDF signing backend
   spec.add_dependency "pkcs11", "~> 0.3"
   spec.add_dependency "rubyzip", "~> 2.3"
   spec.add_dependency "thor", "~> 1.3"
