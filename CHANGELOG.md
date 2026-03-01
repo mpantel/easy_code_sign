@@ -7,31 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-03-01
+
 ### Added
 
-- **PDF Document Signing**
-  - Sign PDF documents (.pdf) with PKCS#7 digital signatures
-  - Visible signature annotations with customizable position (top-left, top-right, bottom-left, bottom-right)
-  - Signature metadata (reason, location, contact info)
-  - Page selection for signature placement
-  - RFC 3161 timestamp embedding in PDF signatures
-  - ByteRange-based signing for PDF incremental updates
+- **Native MIT-licensed PDF signing backend** (`NativeSigner` + `CmsBuilder`)
+  - ISO 32000 incremental-update signatures (`adbe.pkcs7.detached`) with no AGPL dependency
+  - `CmsBuilder`: assembles CMS `SignedData` via OpenSSL ASN.1 with a `sign_bytes(hash)` callback
+    interface — compatible with HSM/hardware-token providers that only expose raw signing
+  - `NativeSigner`: appends signature dict, AcroForm field, and updated catalog as a valid
+    PDF incremental update; computes ByteRange via raw file I/O
 
-- **PDF Verification**
-  - Verify signed PDF documents
-  - ByteRange integrity checking
-  - Extract and display PDF signature metadata
+### Changed
 
-- **CLI Enhancements for PDF**
-  - `--visible-signature` - Add visible signature annotation
-  - `--signature-page` - Select page for signature
-  - `--signature-position` - Position preset (top_left, top_right, bottom_left, bottom_right)
-  - `--signature-reason` - Reason for signing
-  - `--signature-location` - Signing location
+- `pdf-reader` (~> 2.0, MIT) replaces `hexapdf` as the runtime dependency for PDF parsing
+- `PdfFile#apply_signature` and `#extract_signature` use the native backend by default
 
-### Dependencies
+### Removed
 
-- Added HexaPDF (~> 1.0) for PDF manipulation and signing
+- **HexaPDF dependency** (AGPL) — removed from both runtime and development dependencies.
+  easy_code_sign is now fully MIT-licensed throughout its dependency chain.
+- Deferred signing API (`prepare_deferred`, `finalize_deferred`) — these were built on
+  HexaPDF internals and are removed with it.
 
 ## [0.1.0] - 2025-01-06
 
@@ -92,4 +89,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Private keys never leave the hardware token
 - Certificate revocation checking enabled by default
 
+[Unreleased]: https://github.com/mpantel/easy_code_sign/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/mpantel/easy_code_sign/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/mpantel/easy_code_sign/releases/tag/v0.1.0
