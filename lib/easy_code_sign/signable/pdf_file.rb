@@ -46,13 +46,16 @@ module EasyCodeSign
                     end
 
         signer = Pdf::NativeSigner.new(
-          pdf_path:          file_path,
-          output_path:       output_path,
-          certificate:       signing_certificate,
-          certificate_chain: certificate_chain[1..] || [],
-          reason:            @signature_config[:reason],
-          location:          @signature_config[:location],
-          contact_info:      @signature_config[:contact_info]
+          pdf_path:           file_path,
+          output_path:        output_path,
+          certificate:        signing_certificate,
+          certificate_chain:  certificate_chain[1..] || [],
+          reason:             @signature_config[:reason],
+          location:           @signature_config[:location],
+          contact_info:       @signature_config[:contact_info],
+          metadata:           @signature_config[:metadata],
+          metadata_namespace: @signature_config[:metadata_namespace],
+          metadata_prefix:    @signature_config[:metadata_prefix]
         )
         signer.sign { |hash| sign_proc.call(hash) }
       end
@@ -102,13 +105,16 @@ module EasyCodeSign
 
       def build_signature_config(opts)
         {
-          visible:      opts.fetch(:visible_signature, false),
-          page:         opts.fetch(:signature_page, 1),
-          position:     opts.fetch(:signature_position, :bottom_right),
-          rect:         opts[:signature_rect],
-          reason:       opts[:signature_reason],
-          location:     opts[:signature_location],
-          contact_info: opts[:signature_contact]
+          visible:            opts.fetch(:visible_signature, false),
+          page:               opts.fetch(:signature_page, 1),
+          position:           opts.fetch(:signature_position, :bottom_right),
+          rect:               opts[:signature_rect],
+          reason:             opts[:signature_reason],
+          location:           opts[:signature_location],
+          contact_info:       opts[:signature_contact],
+          metadata:           opts.fetch(:signature_metadata, {}),
+          metadata_namespace: opts[:signature_metadata_namespace],
+          metadata_prefix:    opts[:signature_metadata_prefix]
         }
       end
     end

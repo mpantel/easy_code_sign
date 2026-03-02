@@ -27,15 +27,19 @@ module EasyCodeSign
       BR_PLACEHOLDER = "[0000000000 0000000000 0000000000 0000000000]"
 
       def initialize(pdf_path:, output_path:, certificate:, certificate_chain: [],
-                     reason: nil, location: nil, contact_info: nil, signing_time: nil)
-        @pdf_path          = pdf_path
-        @output_path       = output_path
-        @certificate       = certificate
-        @certificate_chain = certificate_chain
-        @reason            = reason
-        @location          = location
-        @contact_info      = contact_info
-        @signing_time      = signing_time || Time.now
+                     reason: nil, location: nil, contact_info: nil, signing_time: nil,
+                     metadata: {}, metadata_namespace: nil, metadata_prefix: nil)
+        @pdf_path           = pdf_path
+        @output_path        = output_path
+        @certificate        = certificate
+        @certificate_chain  = certificate_chain
+        @reason             = reason
+        @location           = location
+        @contact_info       = contact_info
+        @signing_time       = signing_time || Time.now
+        @metadata           = metadata || {}
+        @metadata_namespace = metadata_namespace || "http://sphragis.github.io/ns/1.0/"
+        @metadata_prefix    = metadata_prefix || "custom"
       end
 
       # Produce a signed PDF.
@@ -56,6 +60,7 @@ module EasyCodeSign
         # New object numbers
         sig_obj_num   = orig_size
         field_obj_num = orig_size + 1
+        xmp_obj_num   = orig_size + 2
 
         # The incremental update begins after a "\n" separator
         base = original.bytesize + 1  # +1 for the separator newline
@@ -68,21 +73,25 @@ module EasyCodeSign
         field_body   = build_field_body(field_obj_num, sig_obj_num)
         field_offset = sig_offset + sig_body.bytesize
 
+        xmp_body   = build_xmp_body(xmp_obj_num)
+        xmp_offset = field_offset + field_body.bytesize
+
         catalog_obj_num = root_ref.id
         catalog_gen     = root_ref.gen
         catalog_body    = build_catalog_body(catalog_obj_num, catalog_gen,
-                                             field_obj_num, root_ref, reader)
-        catalog_offset  = field_offset + field_body.bytesize
+                                             field_obj_num, xmp_obj_num, root_ref, reader)
+        catalog_offset  = xmp_offset + xmp_body.bytesize
 
         xref_offset = catalog_offset + catalog_body.bytesize
 
         xref_str = build_xref(
-          sig_obj_num    => sig_offset,
-          field_obj_num  => field_offset,
+          sig_obj_num     => sig_offset,
+          field_obj_num   => field_offset,
+          xmp_obj_num     => xmp_offset,
           catalog_obj_num => catalog_offset
         )
 
-        new_size    = [sig_obj_num, field_obj_num, catalog_obj_num].max + 1
+        new_size    = [sig_obj_num, field_obj_num, xmp_obj_num, catalog_obj_num].max + 1
         trailer_str = "trailer\n" \
           "<</Size #{new_size}" \
           " /Root #{ref(catalog_obj_num, catalog_gen)}" \
@@ -91,7 +100,7 @@ module EasyCodeSign
 
         combined = original +
                    "\n" +
-                   sig_body + field_body + catalog_body +
+                   sig_body + field_body + xmp_body + catalog_body +
                    xref_str + trailer_str
 
         File.binwrite(@output_path, combined)
@@ -160,7 +169,7 @@ module EasyCodeSign
           ">>\nendobj\n"
       end
 
-      def build_catalog_body(obj_num, gen, field_obj_num, root_ref, reader)
+      def build_catalog_body(obj_num, gen, field_obj_num, xmp_obj_num, root_ref, reader)
         catalog = reader.objects[root_ref] || {}
 
         parts = ["/Type /Catalog"]
@@ -170,13 +179,14 @@ module EasyCodeSign
           parts << "/Pages #{ref(pr.id, pr.gen)}"
         end
 
-        # Preserve common catalog entries
+        # Preserve common catalog entries (Metadata is intentionally excluded — we replace it)
         %i[ViewerPreferences PageLayout PageMode Names Outlines MarkInfo Lang].each do |key|
           val = catalog[key]
           next unless val
           parts << "/#{key} #{pdf_val(val)}"
         end
 
+        parts << "/Metadata #{ref(xmp_obj_num, 0)}"
         parts << "/AcroForm <</Fields [#{ref(field_obj_num, 0)}] /SigFlags 3>>"
 
         "#{obj_num} #{gen} obj\n<<#{parts.join("\n")}>>\nendobj\n"
@@ -233,6 +243,67 @@ module EasyCodeSign
           f.pos = contents_abs          # '<' of /Contents <hex>
           f.write("<#{padded}>")
         end
+      end
+
+      # ------------------------------------------------------------------ #
+      # XMP metadata stream                                                  #
+      # ------------------------------------------------------------------ #
+
+      def build_xmp_body(obj_num)
+        xml = build_xmp_xml
+        "#{obj_num} 0 obj\n" \
+          "<</Type /Metadata\n/Subtype /XML\n/Length #{xml.bytesize}>>\n" \
+          "stream\n" + xml + "endstream\nendobj\n"
+      end
+
+      def build_xmp_xml
+        ts  = @signing_time.utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+        has_custom = @metadata.any? || @reason || @location || @contact_info
+
+        ns_attrs = +""
+        ns_attrs << %(\n        xmlns:xmp="http://ns.adobe.com/xap/1.0/")
+        ns_attrs << %(\n        xmlns:pdf="http://ns.adobe.com/pdf/1.3/")
+        ns_attrs << %(\n        xmlns:#{@metadata_prefix}="#{@metadata_namespace}") if has_custom
+
+        elems = +""
+        elems << "      <xmp:CreateDate>#{ts}</xmp:CreateDate>\n"
+        elems << "      <xmp:MetadataDate>#{ts}</xmp:MetadataDate>\n"
+        elems << "      <pdf:Producer>easy_code_sign</pdf:Producer>\n"
+        if @reason
+          elems << "      <#{@metadata_prefix}:SignatureReason>" \
+                   "#{xml_escape(@reason)}" \
+                   "</#{@metadata_prefix}:SignatureReason>\n"
+        end
+        if @location
+          elems << "      <#{@metadata_prefix}:SignatureLocation>" \
+                   "#{xml_escape(@location)}" \
+                   "</#{@metadata_prefix}:SignatureLocation>\n"
+        end
+        if @contact_info
+          elems << "      <#{@metadata_prefix}:SignatureContactInfo>" \
+                   "#{xml_escape(@contact_info)}" \
+                   "</#{@metadata_prefix}:SignatureContactInfo>\n"
+        end
+        @metadata.each do |key, value|
+          elems << "      <#{@metadata_prefix}:#{key}>" \
+                   "#{xml_escape(value.to_s)}" \
+                   "</#{@metadata_prefix}:#{key}>\n"
+        end
+
+        bom = "\u{FEFF}"
+        "<?xpacket begin=\"#{bom}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n" \
+        "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n" \
+        "  <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n" \
+        "    <rdf:Description rdf:about=\"\"#{ns_attrs}>\n" +
+        elems +
+        "    </rdf:Description>\n" \
+        "  </rdf:RDF>\n" \
+        "</x:xmpmeta>\n" \
+        "<?xpacket end=\"w\"?>\n"
+      end
+
+      def xml_escape(str)
+        str.gsub("&", "&amp;").gsub("<", "&lt;").gsub(">", "&gt;").gsub('"', "&quot;")
       end
 
       # ------------------------------------------------------------------ #
